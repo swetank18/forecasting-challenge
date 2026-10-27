@@ -28,3 +28,28 @@ def add_bands(point: np.ndarray, quantiles: pd.DataFrame, lo: float = 0.0, hi: f
     for p in quantiles.columns:
         out[f"p{int(round(p * 100))}"] = np.clip(point + quantiles[p].to_numpy(), lo, hi)
     return out
+
+
+def policy_stats(actual, capacity, window=None) -> dict:
+    gap = np.asarray(capacity, dtype=float) - np.asarray(actual, dtype=float)
+    out = {
+        "breach_rate": float(np.mean(gap < 0)),
+        "mean_headroom": float(np.mean(gap)),
+        "worst_shortfall": float(max(-gap.min(), 0.0)),
+    }
+    if window is not None:
+        out["window_breach_rate"] = float(pd.Series(gap < 0).groupby(np.asarray(window)).any().mean())
+    return out
+
+
+def backtest_policies(results: pd.DataFrame, model: str, h: int, p: float = 0.95) -> pd.DataFrame:
+    """Capacity rules scored on backtest folds: per-step band, flat 2h block, static margin on persistence."""
+    m = results[results["model"] == model].sort_values(["origin", "step"])
+    base = results[results["model"] == "persistence"].sort_values(["origin", "step"])
+    q = residual_quantiles(m, h, probs=(p,))[p]
+    per_step = m["forecast"].to_numpy() + m["step"].map(q).to_numpy()
+    block = pd.Series(per_step).groupby(m["origin"].to_numpy()).transform("max").to_numpy()
+    static = base["forecast"].to_numpy() + base["error"].quantile(p)
+    actual, window = m["actual"].to_numpy(), m["origin"].to_numpy()
+    rules = {"per_step_band": per_step, "block_max_band": block, "persistence_static_margin": static}
+    return pd.DataFrame({k: policy_stats(actual, v, window) for k, v in rules.items()}).T
