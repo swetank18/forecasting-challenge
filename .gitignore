@@ -2,3 +2,7 @@
 .venv/
 .pytest_cache/
 __pycache__/
+.ipynb_checkpoints/
+challenge_data/*
+!challenge_data/README.md
+outputs/
