@@ -34,3 +34,24 @@ def normalized_mae(y_true, y_pred, baseline_pred) -> float:
     if baseline_mae == 0:
         return 0.0 if model_mae == 0 else float("inf")
     return float(model_mae / baseline_mae)
+
+
+def mase(y_true, y_pred, y_train) -> float:
+    scale = np.mean(np.abs(np.diff(np.asarray(y_train, dtype=float))))
+    err = mae(y_true, y_pred)
+    if scale == 0:
+        return 0.0 if err == 0 else float("inf")
+    return float(err / scale)
+
+
+def peak_mae(y_true, y_pred, threshold: float) -> float:
+    a = np.asarray(y_true, dtype=float)
+    b = np.asarray(y_pred, dtype=float)
+    mask = a >= threshold
+    if not mask.any():
+        return float("nan")
+    return mae(a[mask], b[mask])
+
+
+def coverage(y_true, upper) -> float:
+    return float(np.mean(np.asarray(y_true, dtype=float) <= np.asarray(upper, dtype=float)))
