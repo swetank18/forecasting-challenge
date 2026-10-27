@@ -1,129 +1,101 @@
-# Cloud Workload Forecasting Challenge
+# Cloud Workload Forecasting
 
-AI/ML take-home challenge built from the **Microsoft Azure Public Dataset V2** VM trace.
+Forecasts the last two hours of aggregate demand (`active_vm_count`, `aggregate_cpu_utilization`) for 10,000 Azure VMs. It uses a leakage-safe rolling-origin backtest to pick the model and turns the forecast into a capacity rule.
 
-## Start here
+Results and reasoning are in [`reports/final_report.md`](reports/final_report.md). The original challenge brief is in [`ASSIGNMENT.md`](ASSIGNMENT.md), [`DATASET.md`](DATASET.md) and [`SUBMISSION.md`](SUBMISSION.md).
 
-1. Read [`ASSIGNMENT.md`](ASSIGNMENT.md).
-2. Read [`DATASET.md`](DATASET.md).
-3. Download the **`data-v1` GitHub Release** dataset and extract it as `challenge_data/`.
-4. Read [`SUBMISSION.md`](SUBMISSION.md).
-5. Implement your analysis and forecasting pipeline.
+## Setup
 
-The challenge dataset is distributed as a versioned GitHub Release rather than committed to the repository. The `data-v1` release contains the fixed curated dataset used for this assignment.
-
-## Environment setup
-
-Python **3.11 or newer** is required.
-
-Create a virtual environment:
-
-### Linux / macOS
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-```
-
-### Windows PowerShell
-
-```powershell
-py -m venv .venv
-.venv\Scripts\Activate.ps1
-```
-
-### Windows Command Prompt
-
-```cmd
-py -m venv .venv
-.venv\Scripts\activate.bat
-```
-
-Install the project and development dependencies:
-
-```bash
-python -m pip install --upgrade pip
-python -m pip install -e ".[dev]"
-```
-
-Verify the installation:
-
-```bash
-python -m pytest -q
-```
-
-The repository includes a small test suite covering the starter forecasting utilities. Run it before beginning the assignment.
-
-## Dataset download
-
-The hiring dataset is distributed as the fixed `data-v1` release of this repository.
-
-**Download:** [Azure Dataset v1 Release](https://github.com/atomityhq/forecasting-challenge/releases/tag/data-v1)
-
-Download `data-v1.tar.gz` from the release and extract it into the repository as `challenge_data/`:
-
-```bash
-mkdir -p challenge_data
-tar -xzf data-v1.tar.gz -C challenge_data
-```
-
-The resulting layout is:
-
-```text
-challenge_data/
-├── vm_cpu_readings.csv.gz
-├── vm_metadata.csv.gz
-├── DATA_CARD.md
-└── SHA256SUMS
-```
-
-Verify the dataset before starting the assignment:
-
-```bash
-cd challenge_data
-sha256sum -c SHA256SUMS
-```
-
-You should see:
-
-```text
-vm_cpu_readings.csv.gz: OK
-vm_metadata.csv.gz: OK
-DATA_CARD.md: OK
-```
-
-The release is a real, curated subset of the Microsoft Azure Public Dataset V2. It is not synthetic data.
-
-The dataset contains 10,000 VMs with 134 CPU measurements per VM at five-minute intervals, for a total of 1,340,000 CPU observations.
-
-Use the exact `data-v1` release provided for this assignment. Do not substitute another dataset or a different version of the Azure Public Dataset.
-
-## What you are solving
-
-The underlying data contains anonymized VM workload telemetry sampled every five minutes. Your job is to understand the workload and build a defensible forecasting pipeline for near-term aggregate demand.
-
-The challenge is intentionally open-ended. We evaluate reasoning, time-series methodology, leakage prevention, error analysis, reproducibility, and the quality of your operational conclusions—not just model complexity.
-
-## Expected environment
-
-Python 3.11+ is recommended.
+Python 3.11+.
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -e '.[dev]'
-pytest -q
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev]"
 ```
 
-Model dependencies are intentionally not prescribed. Add only what you need and document them.
+`pyproject.toml` has version ranges. `requirements-lock.txt` pins the exact versions the results were produced with (`pip install -r requirements-lock.txt && pip install -e . --no-deps`).
 
-## Source
+## Data
 
-Microsoft Azure Public Dataset V2:
-https://github.com/Azure/AzurePublicDataset
+Download `data-v1.tar.gz` from the [data-v1 release](https://github.com/atomityhq/forecasting-challenge/releases/tag/data-v1) and extract it into `challenge_data/`:
 
-The official V2 documentation describes a 30-day VM trace with five-minute CPU readings, VM metadata, and encrypted subscription/deployment/VM identifiers. The full upstream trace is much larger than this challenge release.
+```bash
+mkdir -p challenge_data
+tar -xzf data-v1.tar.gz -C challenge_data
+(cd challenge_data && sha256sum -c SHA256SUMS)
+```
 
-## Submission
+With the GitHub CLI: `gh release download data-v1 -R atomityhq/forecasting-challenge`. The data is not committed.
 
-Submit your work as a repository or archive according to [`SUBMISSION.md`](SUBMISSION.md).
+## Generate predictions
+
+```bash
+python -m cwfc.predict --data challenge_data --output predictions.csv
+```
+
+This takes about 10 seconds and, in order:
+
+1. loads and validates the readings and prints the quality checks;
+2. builds both targets on the full 5-minute grid, then splits off the last 24 timestamps as the holdout;
+3. runs the rolling-origin backtest on the training window only and picks a model per target;
+4. refits the chosen models on the training window and forecasts the 24 holdout timestamps;
+5. writes `predictions.csv` (`timestamp,active_vm_count,aggregate_cpu_utilization`, no index);
+6. only then scores the holdout against the forecast and persistence, for reporting. Nothing from this step goes back into the model.
+
+It also writes backtest tables, the model choice, forecast bands and the holdout evaluation to `outputs/` (git-ignored).
+
+Options: `--horizon` (default 24), `--outputs-dir`, `--quiet`. Nothing depends on 10,000 VMs, 134 timestamps or a 110-point training window. The split, backtest origins and season length all come from the data, and the pipeline shrinks the backtest gracefully on small datasets.
+
+## Backtests, notebooks, tests
+
+```bash
+python -m cwfc.train --data challenge_data      # backtest tables only, into outputs/
+python -m pytest -q
+jupyter nbconvert --to notebook --execute --inplace notebooks/*.ipynb
+```
+
+- `01_data_understanding`: schema, quality checks, cadence, shared timestamps, lifetimes, target construction
+- `02_eda_workload`: CPU distribution, temporal structure, hourly cycle, segments, peaks
+- `03_backtest_results`: metric tables, error by horizon, worst fold, intervals, capacity rules, holdout
+
+The notebooks import everything from `src/cwfc` and save the report figures to `reports/figures/`.
+
+The tests cover target construction (dedup, invalid values, gaps), the split, the backtest plan on short series, leakage, and the prediction contract. The leakage tests check that features and forecasts don't change when future data is corrupted. The smoke test runs the whole CLI on a synthetic dataset of 5 VMs × 40 timestamps.
+
+## Layout
+
+```
+src/cwfc/
+  config.py      horizon, cadence, backtest settings
+  io.py          loading and data quality checks
+  targets.py     target construction, segment helpers
+  split.py       train/holdout split, rolling origins
+  baselines.py   persistence, moving averages, drift, seasonal naive
+  models.py      ETS, seasonal ETS, ARIMA (AIC per fold), level+season, direct ridge
+  features.py    origin-safe lag and rolling features
+  backtest.py    rolling-origin loop, summary table, model selection
+  metrics.py     MAE, RMSE, MASE, peak MAE, coverage
+  intervals.py   residual-quantile bands, capacity rule scoring
+  train.py       backtest CLI
+  predict.py     prediction CLI
+```
+
+## Main decisions
+
+- **`active_vm_count` gets persistence.** Every VM reports at every timestamp, so the series is constant at 10,000. Every model ties at zero error, and the simplest one wins the tie.
+- **`aggregate_cpu_utilization` gets seasonal ETS** (additive level + 12-step season). The differenced series shows a clear hourly cycle (lag-12 ACF 0.61). ETS beat persistence by 12% MAE in backtest and by 4.6% on the holdout.
+- **Validation:** an expanding window on the training data only, 13 origins every 15 minutes from t = 48, each forecasting 24 steps, with the same origins for every model. Selection uses mean fold MASE, with ties going to the simpler model.
+- **No daily or weekly features.** 11 hours of data can't validate them. The within-hour phase is known in advance at any origin and is the only calendar signal used.
+- **Intervals** come from per-step quantiles of backtest errors. The recommended capacity rule is a flat level at the highest p95 band value over each 2-hour window.
+- **The ML model was kept and reported, but not chosen.** A direct ridge on lag and rolling features didn't beat persistence with ~110 points.
+
+## Assumptions
+
+- Timestamps are seconds from the trace start on a 5-minute grid. Holdout timestamps are the last 24 grid points.
+- A VM is active at `t` if it has a finite `avg_cpu` reading at `t`. Duplicate readings for a VM are averaged, and CPU is clipped to [0, 100].
+- If a timestamp were missing entirely, its targets would be linearly interpolated and flagged. This release has no gaps.
+- `active_vm_count` predictions are rounded to integers. CPU predictions are clipped to [0, 100].
+- Metadata deletion times are future information and are never used as features.
+- The holdout is used once, for final scoring. It never feeds fitting, feature construction, tuning or selection.
