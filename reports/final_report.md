@@ -4,7 +4,7 @@ Data: `data-v1` (10,000 Azure VMs × 134 five-minute readings). Code, notebooks 
 
 ## 1. Executive summary
 
-- **`active_vm_count` is a constant 10,000.** Every selected VM reports at every timestamp, because the curated sample only admitted VMs with a complete trace. Persistence is exact for this target, and that is the forecast we submit. On this sample, the count says nothing about real fleet churn.
+- **`active_vm_count` is a constant 10,000.** Every selected VM reports at every timestamp, because the curated sample only admitted VMs with a complete trace. Persistence is exact for this target, and that is the forecast I submit. On this sample, the count says nothing about real fleet churn.
 - **`aggregate_cpu_utilization` is very stable and fairly predictable.** It stays between 8.98% and 9.91% (std 0.19 pts). On top of a slowly wandering level it has a clear **hourly cycle**: a dip followed by a jump at a fixed 5-minute phase each hour, which looks like scheduled jobs.
 - **A seasonal exponential smoothing model (ETS, additive level + 12-step season) is the chosen model.** In a 13-origin rolling backtest inside the training window it beats persistence by **12% on MAE** (0.227 vs 0.258 pts) and 10% on RMSE. On the untouched 2-hour holdout, scored once, it beats persistence by **4.6% on MAE** (0.140 vs 0.147) and 4.8% on RMSE. The gain is real but small, and the main reason the model works is the hourly cycle.
 - **Recommendation:** every 15 minutes, provision for the next 2 hours at one flat level equal to the **highest p95 band value in that window**. In backtest this removed every under-provisioning event for about 0.7 pts of mean headroom (~200 vCPUs on a 28k-vCPU fleet). On the holdout it also had no breaches. Pre-schedule capacity for the hourly spike instead of reacting to it.
@@ -23,7 +23,7 @@ All checks are in `cwfc.io.check_data` and `notebooks/01_data_understanding.ipyn
 | VMs per timestamp | 10,000 at every timestamp |
 | Readings ↔ metadata | identical VM sets, one metadata row per VM |
 
-**Shared timestamps.** All VMs cover the same 134 timestamps, so the window has no churn. The metadata shows every VM already existed when the trace started, and 82% were still alive at the end of the 30-day trace. The earliest deletion comes 10 minutes after the last reading. Deletion timestamps are future information, so we use them only to describe the sample and never as a feature.
+**Shared timestamps.** All VMs cover the same 134 timestamps, so the window has no churn. The metadata shows every VM already existed when the trace started, and 82% were still alive at the end of the 30-day trace. The earliest deletion comes 10 minutes after the last reading. Deletion timestamps are future information, so I use them only to describe the sample and never as a feature.
 
 **Target construction** (`cwfc.targets.build_targets`) is done on the full series first, and the split happens afterwards:
 
@@ -44,7 +44,7 @@ Each target value uses only readings from its own timestamp, so building the ser
 
 **The aggregate is far smoother than any single VM.** The median per-VM standard deviation is 1.35 pts and the median per-VM lag-1 autocorrelation is just 0.07, so individual VMs are close to noise at 5-minute resolution. The 10,000-VM mean has a standard deviation of 0.19 pts. *Operationally:* forecast at the pool level. Per-VM 5-minute forecasts would be mostly noise.
 
-**There is an hourly cycle, and no longer cycle can be seen.** The ACF of the differenced training series is 0.61 at lag 12 and 0.58 at lag 24. The within-hour profile has a dip of −0.21 pts at phase 4 followed by a jump of +0.14 pts at phase 5, every hour. About 100 VMs produce 80% of the jump. The cycle is strongest in delay-insensitive VMs, which points to scheduled batch work. With 11 hours of data, daily and weekly seasonality cannot be estimated, so we use no hour-of-day or weekday features. The within-hour phase is known in advance at any origin, so using it involves no leakage. *Operationally:* the spike is predictable, so capacity for it can be scheduled. Staggering those ~100 VMs' jobs would flatten it.
+**There is an hourly cycle, and no longer cycle can be seen.** The ACF of the differenced training series is 0.61 at lag 12 and 0.58 at lag 24. The within-hour profile has a dip of −0.21 pts at phase 4 followed by a jump of +0.14 pts at phase 5, every hour. About 100 VMs produce 80% of the jump. The cycle is strongest in delay-insensitive VMs, which points to scheduled batch work. With 11 hours of data, daily and weekly seasonality cannot be estimated, so I use no hour-of-day or weekday features. The within-hour phase is known in advance at any origin, so using it involves no leakage. *Operationally:* the spike is predictable, so capacity for it can be scheduled. Staggering those ~100 VMs' jobs would flatten it.
 
 ![Aggregate series](figures/aggregate_series.png)
 
@@ -80,7 +80,7 @@ On the full training window, the chosen ETS settles on a fast-moving level (α =
 
 - **Rolling origin with an expanding window, training data only.** Origins start at t = 48 (4 hours of history) and move forward 3 steps (15 min) at a time. Each origin forecasts the next 24 steps, the same horizon as the real task. With 110 training points that gives 13 origins (48, 51, …, 84). Every model, baselines included, uses the same origins. `backtest_plan` derives all of this from the data and shrinks it automatically on short series.
 - **Why this matches production:** a capacity planner re-forecasts the next 2 hours every few minutes using only the past. Each fold does the same.
-- **Selection:** lowest mean fold MASE for each target, with ties going to the simpler model. We check that the winner also leads on MAE and RMSE.
+- **Selection:** lowest mean fold MASE for each target, with ties going to the simpler model. I check that the winner also leads on MAE and RMSE.
 - **Holdout protocol:** the final 24 points are never used in fitting, feature construction, tuning or selection. `predict.py` writes `predictions.csv` first and only then scores the holdout, for reporting. Two tests enforce this. `test_no_leakage.py` checks that features and backtest forecasts don't change when later data is replaced with garbage. `test_holdout_readings_do_not_change_predictions` corrupts the holdout readings, and even drops a VM, then checks that the predictions come out identical.
 
 Caveat: origins are 15 minutes apart with a 2-hour horizon, so neighbouring folds overlap heavily. The 13 folds are not 13 independent tests, and small differences between models should be read with that in mind.
@@ -135,7 +135,7 @@ Some findings run against the model:
 
 ## 8. Capacity-planning recommendation
 
-Uncertainty bands come from backtest errors (`cwfc.intervals`): for each horizon step we take quantiles of `actual − forecast`, pooled over ±2 neighbouring steps (~65 errors per step), and add them to the point forecast. We compared three rules on the backtest folds. All quantiles came from the backtest. The holdout was then used to score the chosen rule once, without changing it.
+Uncertainty bands come from backtest errors (`cwfc.intervals`): for each horizon step I take quantiles of `actual − forecast`, pooled over ±2 neighbouring steps (~65 errors per step), and add them to the point forecast. I compared three rules on the backtest folds. All quantiles came from the backtest. I then scored the chosen rule once on the holdout, without changing it.
 
 | Rule (aggregate CPU) | Backtest: timestamps breached | Backtest: 2-h windows with any breach | Backtest: mean headroom | Holdout: breached | Holdout: mean headroom |
 |---|---:|---:|---:|---:|---:|
@@ -147,7 +147,7 @@ Uncertainty bands come from backtest errors (`cwfc.intervals`): for each horizon
 1. Every 15 minutes, refit the seasonal ETS on the trailing data and forecast the next 2 hours.
 2. Provision the pool for those 2 hours at a **flat level equal to the highest p95 band value in the window**. A per-step band gives each 5-minute slot its own 5% breach chance, so almost a quarter of 2-hour windows would see at least one shortfall. One level per window also avoids scaling up and down every 5 minutes.
 3. Raise capacity **before** the known phase-5 spike each hour. It is scheduled, so there is no reason to wait for autoscaling to react.
-4. **Peak-risk trigger:** if the block level rises more than 0.5 pts above the current level (about the size of the batch block we observed), alert and pre-warm capacity for delay-insensitive workloads. That is where the unpredicted shifts came from.
+4. **Peak-risk trigger:** if the block level rises more than 0.5 pts above the current level (about the size of the batch block I observed), alert and pre-warm capacity for delay-insensitive workloads. That is where the unpredicted shifts came from.
 
 **Trade-off.** Under-provisioning costs throttling, queueing and SLA breaches, and it shows up exactly at peaks, which is where the point forecast is weakest. Over-provisioning costs idle capacity. With ~28,400 allocated vCPUs, one point of mean CPU is roughly 284 vCPUs (this assumes utilisation is independent of VM size; the core-weighted mean is within 0.1 pt of the unweighted one). The block rule's extra 0.22 pts of headroom over the per-step band costs about 60 vCPUs, around 2% of the ~2,640 busy vCPUs, and in backtest it removed every breach. For interactive or SLA-bound pools that is cheap insurance. For delay-insensitive pools, which tolerate a little queueing by design, the static-margin rule is a reasonable lower-cost option.
 
